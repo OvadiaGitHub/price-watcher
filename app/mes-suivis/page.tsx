@@ -1,4 +1,5 @@
 // app/mes-suivis/page.tsx
+import { Actions } from "./Actions";
 import { createClient } from "@supabase/supabase-js";
 import Link from "next/link";
 
@@ -82,6 +83,9 @@ export default async function MesSuivisPage() {
                 <th style={{ padding: 10 }}>Statut</th>
                 <th style={{ padding: 10 }}>Dernier check</th>
                 <th style={{ padding: 10 }}>Prochain check</th>
+                <th style={{ padding: 10 }}>Prochain check</th>
+                <th style={{ padding: 10 }}>Actions</th>
+
               </tr>
             </thead>
             <tbody>
@@ -152,6 +156,9 @@ export default async function MesSuivisPage() {
                     <td style={{ padding: 10 }}>
                       {r.next_check_at ? new Date(r.next_check_at).toLocaleString() : "—"}
                     </td>
+                    <td style={{ padding: 10 }}>
+                       <Actions id={r.id} active={!!r.active} />
+                     </td>
                   </tr>
                 );
               })}
