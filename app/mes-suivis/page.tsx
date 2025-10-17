@@ -2,22 +2,21 @@
 import { createClient } from "@supabase/supabase-js";
 import Link from "next/link";
 
-// Lecture côté serveur avec la Service Role Key (ne sort jamais vers le client)
+// mêmes minimums que côté client/serveur
+const MIN = { abs: 5, pct: 0.03 };
+
 async function getRows() {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
-
-  // Filtrer sur ton "user système" (MVP sans authent)
   const userId = process.env.SUPABASE_SYSTEM_USER_ID!;
   const { data, error } = await supabase
     .from("booking_latest")
     .select("*")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
-    .limit(100);
-
+    .limit(200);
   if (error) throw error;
   return data ?? [];
 }
@@ -28,29 +27,20 @@ function fmtMoney(n: any, ccy: string | null) {
   if (!isFinite(v)) return "—";
   return `${v.toFixed(2)} ${ccy || ""}`.trim();
 }
-
 function pct(n: any) {
   if (n == null) return "—";
   const v = Number(n);
   if (!isFinite(v)) return "—";
   return `${(v * 100).toFixed(1)}%`;
 }
-
 function badge(text: string, tone: "ok" | "warn" | "muted" = "muted") {
-  const bg =
-    tone === "ok" ? "#e6ffed" : tone === "warn" ? "#fff4e5" : "#f5f5f5";
-  const fg =
-    tone === "ok" ? "#066a2b" : tone === "warn" ? "#8a4b00" : "#444";
+  const bg = tone === "ok" ? "#e6ffed" : tone === "warn" ? "#fff4e5" : "#f5f5f5";
+  const fg = tone === "ok" ? "#066a2b" : tone === "warn" ? "#8a4b00" : "#444";
   return (
     <span
       style={{
-        background: bg,
-        color: fg,
-        padding: "2px 8px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 600,
-        whiteSpace: "nowrap",
+        background: bg, color: fg, padding: "2px 8px", borderRadius: 999,
+        fontSize: 12, fontWeight: 600, whiteSpace: "nowrap",
       }}
     >
       {text}
@@ -62,7 +52,7 @@ export default async function MesSuivisPage() {
   const rows = await getRows();
 
   return (
-    <div style={{ maxWidth: 1000, margin: "40px auto", padding: 20 }}>
+    <div style={{ maxWidth: 1040, margin: "40px auto", padding: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
         <h1 style={{ margin: 0 }}>Mes suivis</h1>
         <div style={{ display: "flex", gap: 8 }}>
@@ -97,31 +87,35 @@ export default async function MesSuivisPage() {
             <tbody>
               {rows.map((r: any) => {
                 const productType =
-                  r.origin_iata || r.destination_iata || r.departure_date
-                    ? "Vol"
-                    : "Hôtel";
+                  r.origin_iata || r.destination_iata || r.departure_date ? "Vol" : "Hôtel";
 
                 const deltaOkAbs =
                   r.threshold_abs != null &&
                   r.price_found != null &&
-                  Number(r.price_paid) - Number(r.price_found) >=
-                    Number(r.threshold_abs);
+                  Number(r.price_paid) - Number(r.price_found) >= Number(r.threshold_abs);
 
                 const deltaOkPct =
                   r.threshold_pct != null &&
                   r.price_found != null &&
                   Number(r.price_paid) > 0 &&
-                  (Number(r.price_paid) - Number(r.price_found)) /
-                    Number(r.price_paid) >= Number(r.threshold_pct);
+                  (Number(r.price_paid) - Number(r.price_found)) / Number(r.price_paid) >= Number(r.threshold_pct);
 
                 const shouldAlert = !!(deltaOkAbs || deltaOkPct);
+
+                const thresholdAbsBadge = r.threshold_abs != null
+                  ? `${Number(r.threshold_abs).toFixed(0)}€${Number(r.threshold_abs) === MIN.abs ? " (min)" : ""}`
+                  : "—";
+
+                const thresholdPctBadge = r.threshold_pct != null
+                  ? `${(Number(r.threshold_pct) * 100).toFixed(0)}%${Number(r.threshold_pct) === MIN.pct ? " (min)" : ""}`
+                  : "—";
 
                 return (
                   <tr key={r.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
                     <td style={{ padding: 10 }}>
                       {badge(productType, productType === "Vol" ? "muted" : "ok")}
                     </td>
-                    <td style={{ padding: 10, maxWidth: 280 }}>
+                    <td style={{ padding: 10, maxWidth: 320 }}>
                       {productType === "Hôtel" && r.url ? (
                         <a href={r.url} target="_blank" rel="noreferrer">
                           Lien réservation
@@ -140,31 +134,23 @@ export default async function MesSuivisPage() {
                       </div>
                     </td>
                     <td style={{ padding: 10 }}>{fmtMoney(r.price_paid, r.currency_paid)}</td>
-                    <td style={{ padding: 10 }}>
-                      {fmtMoney(r.price_found, r.currency_found)}
-                    </td>
+                    <td style={{ padding: 10 }}>{fmtMoney(r.price_found, r.currency_found)}</td>
                     <td style={{ padding: 10 }}>
                       {r.delta_abs == null ? "—" : fmtMoney(r.delta_abs, r.currency_paid)}
                     </td>
                     <td style={{ padding: 10 }}>{pct(r.delta_pct)}</td>
                     <td style={{ padding: 10, whiteSpace: "nowrap" }}>
-                      {r.threshold_abs != null && badge(`€≥${Number(r.threshold_abs).toFixed(0)}`, "muted")}{" "}
-                      {r.threshold_pct != null && badge(`%≥${(Number(r.threshold_pct) * 100).toFixed(0)}%`, "muted")}
+                      {badge(`€≥${thresholdAbsBadge}`, "muted")}{" "}
+                      {badge(`%≥${thresholdPctBadge}`, "muted")}
                     </td>
                     <td style={{ padding: 10 }}>
-                      {shouldAlert
-                        ? badge("ALERTE", "warn")
-                        : badge(r.last_status || "—", "muted")}
+                      {shouldAlert ? badge("ALERTE", "warn") : badge(r.last_status || "—", "muted")}
                     </td>
                     <td style={{ padding: 10 }}>
-                      {r.last_checked_at
-                        ? new Date(r.last_checked_at).toLocaleString()
-                        : "—"}
+                      {r.last_checked_at ? new Date(r.last_checked_at).toLocaleString() : "—"}
                     </td>
                     <td style={{ padding: 10 }}>
-                      {r.next_check_at
-                        ? new Date(r.next_check_at).toLocaleString()
-                        : "—"}
+                      {r.next_check_at ? new Date(r.next_check_at).toLocaleString() : "—"}
                     </td>
                   </tr>
                 );
@@ -173,7 +159,6 @@ export default async function MesSuivisPage() {
           </table>
         </div>
       )}
-
       <div style={{ marginTop: 16 }}>
         <a href="/api/checks/run">🔎 Lancer un check (simulation)</a>
       </div>

@@ -1,19 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type ProductType = "hotel" | "flight";
 
+// Seuils (défauts + minimums)
+const DEFAULTS = {
+  hotel: { abs: 10, pct: 0.05 },  // 10€ / 5%
+  flight: { abs: 20, pct: 0.04 }, // 20€ / 4%
+};
+const MIN = {
+  abs: 5,     // 5€
+  pct: 0.03,  // 3%
+};
+
 export default function HomePage() {
   const [productType, setProductType] = useState<ProductType>("hotel");
+  const [customizeThresholds, setCustomizeThresholds] = useState(false);
 
-  // état commun + spécifiques selon le type
+  // état du formulaire
   const [form, setForm] = useState({
     // commun
     price_paid: "",
     currency_paid: "EUR",
-    threshold_abs: "",
-    threshold_pct: "",
+    threshold_abs: String(DEFAULTS.hotel.abs),
+    threshold_pct: String(DEFAULTS.hotel.pct),
 
     // hôtel
     url: "",
@@ -33,42 +44,62 @@ export default function HomePage() {
     direct_only: false,
   });
 
+  // si on change de type, on applique les défauts correspondants
+  useEffect(() => {
+    setForm((f) => ({
+      ...f,
+      threshold_abs: String(DEFAULTS[productType].abs),
+      threshold_pct: String(DEFAULTS[productType].pct),
+    }));
+    // si on repasse en mode défauts, on re-désactive la personnalisation
+    setCustomizeThresholds(false);
+  }, [productType]);
+
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value, type } = e.target as any;
-    if (type === "checkbox") {
-      setForm((f) => ({ ...f, [name]: (e.target as HTMLInputElement).checked }));
-    } else {
-      setForm((f) => ({ ...f, [name]: value }));
-    }
+    const { name, value, type, checked } = e.target as any;
+    setForm((f) => ({ ...f, [name]: type === "checkbox" ? !!checked : value }));
   };
+
+  function clampThresholds(body: any) {
+    if (body.threshold_abs != null) {
+      body.threshold_abs = Math.max(MIN.abs, Number(body.threshold_abs));
+    }
+    if (body.threshold_pct != null) {
+      body.threshold_pct = Math.max(MIN.pct, Number(body.threshold_pct));
+    }
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
     setLoading(true);
     try {
-      // corps minimal requis (toujours)
       const body: any = {
         price_paid: Number(form.price_paid),
         currency_paid: form.currency_paid.toUpperCase(),
       };
 
-      // seuils optionnels
-      if (form.threshold_abs) body.threshold_abs = Number(form.threshold_abs);
-      if (form.threshold_pct) body.threshold_pct = Number(form.threshold_pct);
+      // Seuils :
+      // - si l’utilisateur personnalise → on prend ses valeurs
+      // - sinon → on envoie nos défauts (non visibles mais actifs)
+      if (customizeThresholds) {
+        body.threshold_abs = Number(form.threshold_abs);
+        body.threshold_pct = Number(form.threshold_pct);
+      } else {
+        body.threshold_abs = DEFAULTS[productType].abs;
+        body.threshold_pct = DEFAULTS[productType].pct;
+      }
+      clampThresholds(body);
 
       if (productType === "hotel") {
-        // Hôtel : URL + dates (si tu les as)
         body.url = form.url;
         if (!body.url) throw new Error("URL (hôtel) requise");
         if (form.checkin) body.checkin = form.checkin;
         if (form.checkout) body.checkout = form.checkout;
       } else {
-        // Vol : colonnes vol (si elles existent dans ta base — on les a ajoutées)
-        // (URL reste optionnelle; tu peux l'utiliser pour stocker une page de résa)
         if (form.origin_iata) body.origin_iata = form.origin_iata.trim().toUpperCase();
         if (form.destination_iata) body.destination_iata = form.destination_iata.trim().toUpperCase();
         if (form.departure_date) body.departure_date = form.departure_date;
@@ -86,19 +117,19 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Erreur inconnue");
 
       setMsg(`✅ Surveillance ${productType} enregistrée (id: ${json.booking?.id ?? "?"})`);
 
-      // reset partiel selon le type
+      // reset utile (on garde le type, on revient aux défauts et on grise)
+      setCustomizeThresholds(false);
       setForm((f) => ({
         ...f,
         price_paid: "",
         currency_paid: "EUR",
-        threshold_abs: "",
-        threshold_pct: "",
+        threshold_abs: String(DEFAULTS[productType].abs),
+        threshold_pct: String(DEFAULTS[productType].pct),
         url: "",
         checkin: "",
         checkout: "",
@@ -113,7 +144,6 @@ export default function HomePage() {
         bags: "0",
         direct_only: false,
       }));
-
     } catch (err: any) {
       setMsg(`❌ ${err.message}`);
     } finally {
@@ -136,14 +166,12 @@ export default function HomePage() {
     }
   }
 
+  const thresholdsDisabled = !customizeThresholds;
+
   return (
-    <div style={{maxWidth: 820, margin: "40px auto", padding: 20}}>
+    <div style={{maxWidth: 860, margin: "40px auto", padding: 20}}>
       <h1>Price Watcher — MVP</h1>
       <p>Suivi de prix d’une réservation modifiable/annulable.</p>
-<div style={{padding:"10px 16px", background:"#f8f8f8", borderBottom:"1px solid #eee"}}>
-  <a href="/" style={{marginRight:12, textDecoration:"none"}}>Accueil</a>
-  <a href="/mes-suivis" style={{textDecoration:"none"}}>Mes suivis</a>
-</div>
 
       {/* Sélecteur de type */}
       <div style={{marginTop: 16}}>
@@ -165,29 +193,56 @@ export default function HomePage() {
         </label>
       </div>
 
-      <form onSubmit={onSubmit} style={{display:"grid", gap:12, marginTop: 20}}>
+      {/* Toggle personnalisation seuils */}
+      <div style={{marginTop: 12}}>
+        <label>
+          <input
+            type="checkbox"
+            checked={customizeThresholds}
+            onChange={(e) => setCustomizeThresholds(e.target.checked)}
+          />{" "}
+          Personnaliser les seuils (par défaut : {DEFAULTS[productType].abs}€ / {(DEFAULTS[productType].pct*100).toFixed(0)}%)
+        </label>
+      </div>
 
-        {/* Champs communs */}
-        <div style={{display:"grid", gridTemplateColumns:"1fr 120px 120px 120px", gap:12}}>
+      <form onSubmit={onSubmit} style={{display:"grid", gap:12, marginTop: 16}}>
+        {/* Commun */}
+        <div style={{display:"grid", gridTemplateColumns:"1fr 120px 180px 200px", gap:12}}>
           <label>
             Prix payé (€) *
-            <input name="price_paid" value={form.price_paid} onChange={onChange} required type="number" step="0.01"/>
+            <input name="price_paid" value={form.price_paid} onChange={onChange} required type="number" step="0.01" min="0"/>
           </label>
           <label>
             Devise *
             <input name="currency_paid" value={form.currency_paid} onChange={onChange} required />
           </label>
-          <label>
-            Seuil € (opt.)
-            <input name="threshold_abs" value={form.threshold_abs} onChange={onChange} type="number" step="0.01"/>
+          <label title={`Minimum ${MIN.abs} €`} style={thresholdsDisabled ? {opacity:0.5} : undefined}>
+            Seuil € (min {MIN.abs})
+            <input
+              name="threshold_abs"
+              value={form.threshold_abs}
+              onChange={onChange}
+              type="number"
+              step="0.01"
+              min={MIN.abs}
+              disabled={thresholdsDisabled}
+            />
           </label>
-          <label>
-            Seuil % (opt.)
-            <input name="threshold_pct" value={form.threshold_pct} onChange={onChange} type="number" step="0.0001" placeholder="0.05 = 5%"/>
+          <label title={`Minimum ${(MIN.pct*100).toFixed(0)}%`} style={thresholdsDisabled ? {opacity:0.5} : undefined}>
+            Seuil % (min {(MIN.pct*100).toFixed(0)}%)
+            <input
+              name="threshold_pct"
+              value={form.threshold_pct}
+              onChange={onChange}
+              type="number"
+              step="0.0001"
+              min={MIN.pct}
+              disabled={thresholdsDisabled}
+            />
           </label>
         </div>
 
-        {/* Section HOTEL */}
+        {/* Hôtel */}
         {productType === "hotel" && (
           <>
             <label>
@@ -204,18 +259,18 @@ export default function HomePage() {
 
             <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12}}>
               <label>
-                Check-in (yyyy-mm-dd)
-                <input name="checkin" value={form.checkin} onChange={onChange} placeholder="2026-02-10"/>
+                Check-in
+                <input name="checkin" value={form.checkin} onChange={onChange} type="date"/>
               </label>
               <label>
-                Check-out (yyyy-mm-dd)
-                <input name="checkout" value={form.checkout} onChange={onChange} placeholder="2026-02-12"/>
+                Check-out
+                <input name="checkout" value={form.checkout} onChange={onChange} type="date"/>
               </label>
             </div>
           </>
         )}
 
-        {/* Section VOL */}
+        {/* Vol */}
         {productType === "flight" && (
           <>
             <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12}}>
@@ -231,12 +286,12 @@ export default function HomePage() {
 
             <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12}}>
               <label>
-                Départ (yyyy-mm-dd) *
-                <input name="departure_date" value={form.departure_date} onChange={onChange} placeholder="2026-03-01" required />
+                Départ *
+                <input name="departure_date" value={form.departure_date} onChange={onChange} type="date" required />
               </label>
               <label>
-                Retour (yyyy-mm-dd)
-                <input name="return_date" value={form.return_date} onChange={onChange} placeholder="(optionnel si aller simple)"/>
+                Retour (optionnel)
+                <input name="return_date" value={form.return_date} onChange={onChange} type="date" />
               </label>
             </div>
 
