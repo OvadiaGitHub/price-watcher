@@ -1,32 +1,74 @@
 "use client";
+import { useState } from "react";
 
 export function Actions({ id, active }: { id: string; active: boolean }) {
+  const [loading, setLoading] = useState<"stop" | "recheck" | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  function showToast(text: string) {
+    setToast(text);
+    setTimeout(() => setToast(null), 2500);
+  }
+
   async function stop() {
-    const res = await fetch(`/api/bookings/${id}/deactivate`, { method: "POST" });
-    if (!res.ok) {
+    try {
+      setLoading("stop");
+      const res = await fetch(`/api/bookings/${id}/deactivate`, { method: "POST" });
       const j = await res.json().catch(() => ({}));
-      alert("Erreur stop: " + (j.error || res.statusText));
-      return;
+      if (!res.ok) throw new Error(j.error || res.statusText);
+      showToast("Suivi stoppé");
+      // petit délai pour laisser voir le toast
+      setTimeout(() => location.reload(), 600);
+    } catch (e:any) {
+      showToast(`Erreur stop: ${e.message}`);
+    } finally {
+      setLoading(null);
     }
-    location.reload();
   }
 
   async function recheck() {
-    const res = await fetch(`/api/checks/run?id=${id}`);
-    if (!res.ok) {
+    try {
+      setLoading("recheck");
+      const res = await fetch(`/api/checks/run?id=${id}`);
       const j = await res.json().catch(() => ({}));
-      alert("Erreur recheck: " + (j.error || res.statusText));
-      return;
+      if (!res.ok) throw new Error(j.error || res.statusText);
+      showToast("Recheck lancé");
+      setTimeout(() => location.reload(), 600);
+    } catch (e:any) {
+      showToast(`Erreur recheck: ${e.message}`);
+    } finally {
+      setLoading(null);
     }
-    location.reload();
   }
 
   return (
-    <div style={{ display: "flex", gap: 8 }}>
-      <button onClick={recheck} title="Lancer un check maintenant">🔁 Rechecker</button>
-      <button onClick={stop} disabled={!active} title="Stopper le suivi">
-        🛑 Stopper
+    <div style={{ display: "flex", gap: 8, alignItems: "center", position: "relative" }}>
+      <button onClick={recheck} disabled={loading !== null} title="Lancer un check maintenant">
+        {loading === "recheck" ? "⏳ Recheck..." : "🔁 Rechecker"}
       </button>
+      <button onClick={stop} disabled={!active || loading !== null} title="Stopper le suivi">
+        {loading === "stop" ? "⏳ Stop..." : "🛑 Stopper"}
+      </button>
+
+      {toast && (
+        <div
+          style={{
+            position: "absolute",
+            top: -36,
+            left: 0,
+            background: "#333",
+            color: "white",
+            padding: "6px 10px",
+            borderRadius: 8,
+            fontSize: 12,
+            boxShadow: "0 4px 10px rgba(0,0,0,0.15)"
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
