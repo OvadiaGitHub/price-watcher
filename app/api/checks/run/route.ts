@@ -1,12 +1,36 @@
-// ...imports identiques
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
 const MIN_RECHECK_SECONDS = 30;
+const isProd = !!process.env.VERCEL; // vrai sur Vercel
+
+function unauthorized() {
+  return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+}
 
 export async function GET(req: Request) {
+  // --- Auth cron (skip en local) ---
+  if (isProd && process.env.CRON_SECRET) {
+    const auth = req.headers.get("authorization") || "";
+    if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+      // On autorise tout de même le recheck manuel ciblé depuis l’UI (id présent) ?
+      // Si tu veux *forcer* le secret pour *tous* les appels, supprime ce bloc "id".
+      const url = new URL(req.url);
+      const hasManualId = !!url.searchParams.get("id");
+      if (!hasManualId) return unauthorized();
+    }
+  }
+
   try {
     const url = new URL(req.url);
-    const id = url.searchParams.get("id"); // booking ciblé (optionnel)
+    const id = url.searchParams.get("id"); // recheck ciblé (facultatif)
 
-    // Si recheck ciblé, bloque si le dernier check est trop récent
+    // anti-spam recheck ciblé
     if (id) {
       const { data: last, error: e0 } = await supabaseAdmin
         .from("checks")
@@ -15,29 +39,23 @@ export async function GET(req: Request) {
         .order("checked_at", { ascending: false })
         .limit(1);
       if (e0) throw e0;
-
       if (last && last[0]?.checked_at) {
         const lastTs = new Date(last[0].checked_at).getTime();
-        const nowTs = Date.now();
-        if ((nowTs - lastTs) / 1000 < MIN_RECHECK_SECONDS) {
-          const wait = Math.ceil(MIN_RECHECK_SECONDS - (nowTs - lastTs) / 1000);
-          return NextResponse.json(
-            { ok: false, error: `Trop fréquent. Réessaie dans ~${wait}s.` },
-            { status: 429 }
-          );
+        if ((Date.now() - lastTs) / 1000 < MIN_RECHECK_SECONDS) {
+          const wait = Math.ceil(MIN_RECHECK_SECONDS - (Date.now() - lastTs) / 1000);
+          return NextResponse.json({ ok: false, error: `Trop fréquent. Réessaie dans ~${wait}s.` }, { status: 429 });
         }
       }
     }
 
-    // --- suite inchangée : choisir le booking à checker (avec id ou par next_check_at) ---
+    // choisir le booking (id ciblé ou prochain à échéance)
     let query = supabaseAdmin.from("bookings").select("*").eq("active", true);
     if (id) {
       query = query.eq("id", id).limit(1);
     } else {
-      query = query
-        .lte("next_check_at", new Date().toISOString())
-        .order("next_check_at", { ascending: true })
-        .limit(1);
+      query = query.lte("next_check_at", new Date().toISOString())
+                   .order("next_check_at", { ascending: true })
+                   .limit(1);
     }
     const { data: toCheck, error: e1 } = await query;
     if (e1) throw e1;
@@ -47,7 +65,7 @@ export async function GET(req: Request) {
 
     const b = toCheck[0];
 
-    // Simulation de prix (identique)
+    // --- SIMULATION de prix (à remplacer par provider réel) ---
     const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
     const drop = clamp(Math.round((Math.random() * 25) + 5), 5, 30);
     const price_found = Math.max(1, Number(b.price_paid) - drop);
@@ -73,7 +91,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      message: `Check fait pour booking ${b.id}. Prix simulé: ${price_found} ${currency_found}. Alerte: ${shouldAlert ? "OUI" : "non"}.`
+      message: `Check booking ${b.id}. Prix simulé: ${price_found} ${currency_found}. Alerte: ${shouldAlert ? "OUI" : "non"}.`
     });
   } catch (e:any) {
     return NextResponse.json({ ok: false, error: e.message }, { status: 500 });
