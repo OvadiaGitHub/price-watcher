@@ -100,26 +100,37 @@ export async function GET(req: Request) {
 
     // Si alerte: insérer dans alerts (+ email optionnel)
     if (shouldAlert) {
-      const { error: e3 } = await supabaseAdmin.from("alerts").insert({
-        booking_id: (b as any).id,
-        check_id: newCheck.id,
-        delta_abs: deltaAbs,
-        delta_pct: deltaPct ?? 0,
-        channel: "email" // ou "push" plus tard
-      });
-      if (e3) console.error("alerts.insert error", e3);
+  // 1) Log en base
+  const { data: alertRow, error: e3 } = await supabaseAdmin
+    .from("alerts")
+    .insert({
+      booking_id: (b as any).id,
+      check_id: newCheck.id,
+      delta_abs: deltaAbs,
+      delta_pct: deltaPct ?? 0,
+      channel: "email"
+    })
+    .select("*")
+    .single();
+  if (e3) console.error("alerts.insert error", e3);
 
-      // (Optionnel) déclencher un e-mail si tu as créé /api/alerts/send
-      // await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/alerts/send`, {
-      //   method: "POST",
-      //   headers: { "Content-Type": "application/json" },
-      //   body: JSON.stringify({
-      //     to: process.env.ALERTS_TO_DEFAULT!,
-      //     subject: `💸 Économie possible: ~${Math.round(deltaAbs)}€`,
-      //     html: `<p>Prix payé: ${b.price_paid} ${b.currency_paid}<br/>Prix trouvé: ${price_found} ${currency_found}</p>`
-      //   })
-      // }).catch((e) => console.error("send alert email error", e));
-    }
+  // 2) Envoi e-mail (utilitaire Resend)
+  try {
+    // import dynamique pour éviter de charger resend si pas nécessaire
+    const { sendPriceAlertEmail } = await import("../../../lib/mailer");
+    await sendPriceAlertEmail({
+      booking: b,
+      price_found,
+      currency_found,
+      delta_abs: deltaAbs,
+      delta_pct: deltaPct,
+      deeplink: (b as any).url || undefined, // hôtel: lien direct; vols: on mettra un deeplink provider plus tard
+    });
+  } catch (e) {
+    console.error("sendPriceAlertEmail error", e);
+  }
+}
+
 
     return NextResponse.json({
       ok: true,
