@@ -82,18 +82,58 @@ export async function GET(req: Request) {
     });
     if (e2) throw e2;
 
-    let shouldAlert = false;
-    if (b.threshold_abs != null && price_found <= Number(b.price_paid) - Number(b.threshold_abs)) shouldAlert = true;
-    if (!shouldAlert && b.threshold_pct != null && b.price_paid > 0) {
-      const deltaPct = (Number(b.price_paid) - price_found) / Number(b.price_paid);
-      if (deltaPct >= Number(b.threshold_pct)) shouldAlert = true;
-    }
+    // ... après l'insert dans checks (e2), calcule l’alerte :
+let shouldAlert = false;
+let deltaAbs = null as number | null;
+let deltaPct = null as number | null;
 
-    return NextResponse.json({
-      ok: true,
-      message: `Check booking ${b.id}. Prix simulé: ${price_found} ${currency_found}. Alerte: ${shouldAlert ? "OUI" : "non"}.`
-    });
-  } catch (e:any) {
-    return NextResponse.json({ ok: false, error: e.message }, { status: 500 });
-  }
+deltaAbs = Number(b.price_paid) - Number(price_found);
+if (b.price_paid > 0) deltaPct = deltaAbs / Number(b.price_paid);
+
+if (b.threshold_abs != null && deltaAbs >= Number(b.threshold_abs)) shouldAlert = true;
+if (!shouldAlert && b.threshold_pct != null && deltaPct != null && deltaPct >= Number(b.threshold_pct)) {
+  shouldAlert = true;
 }
+
+if (shouldAlert) {
+  // 1) Log en base
+  const { error: e3 } = await supabaseAdmin.from("alerts").insert({
+    booking_id: b.id,
+    check_id: undefined,        // optionnel si tu veux relier au check: il faut récupérer l’id du check inséré via .select() plus haut
+    delta_abs: deltaAbs!,
+    delta_pct: deltaPct!,
+    channel: "email"
+  });
+  if (e3) console.error("alerts.insert error", e3);
+
+  // 2) Envoi e-mail
+  const to = process.env.ALERTS_TO_DEFAULT!;
+  const subject = `💸 Économie possible: ${Math.round(deltaAbs!)}€`;
+  const deeplink = (b.url as string) || ""; // pour l’instant, on met le même lien (Hôtel). Pour Vols, on mettra le deeplink provider.
+  const lines = [
+    `<h2>Bonne nouvelle 🎉</h2>`,
+    `<p>Réservation <strong>${b.origin_iata ? "Vol" : "Hôtel"}</strong> : on peut gagner ~<strong>${Math.round(deltaAbs!)}€</strong>`,
+    deltaPct != null ? ` (~${Math.round(deltaPct!*100)}%)` : "",
+    `.</p>`,
+    `<ul>`,
+    b.origin_iata ? `<li>${b.origin_iata} → ${b.destination_iata} le ${b.departure_date ?? "?"}</li>` : "",
+    !b.origin_iata && b.url ? `<li><a href="${deeplink}" target="_blank">Lien réservation</a></li>` : "",
+    `<li>Prix payé : ${b.price_paid} ${b.currency_paid}</li>`,
+    `<li>Prix trouvé : ${price_found} ${currency_found}</li>`,
+    `</ul>`,
+    deeplink ? `<p><a href="${deeplink}" target="_blank" style="display:inline-block;padding:10px 14px;background:#0a7;color:#fff;border-radius:8px;text-decoration:none">Rebook maintenant</a></p>` : "",
+    `<p style="color:#666">Seuils: €≥${b.threshold_abs ?? "—"}, %≥${b.threshold_pct != null ? Math.round(b.threshold_pct*100)+"%" : "—"}</p>`
+  ].join("");
+
+  // Appel interne (server → server)
+  await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/alerts/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to, subject, html: lines })
+  }).catch((e) => console.error("send alert email error", e));
+}
+
+return NextResponse.json({
+  ok: true,
+  message: `Check booking ${b.id}. Prix simulé: ${price_found} ${currency_found}. Alerte: ${shouldAlert ? "OUI" : "non"}.`
+});

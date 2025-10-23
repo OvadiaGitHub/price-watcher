@@ -3,6 +3,14 @@ import { Actions } from "./Actions";
 import { createClient } from "@supabase/supabase-js";
 import Link from "next/link";
 
+function fmtDateStable(d: any) {
+  if (!d) return "—";
+  const x = new Date(d);
+  // Rend un format ISO court (UTC) identique côté serveur et côté client
+  return x.toISOString().slice(0, 16).replace("T", " "); // ex: 2025-10-23 14:05
+}
+
+
 // mêmes minimums que côté client/serveur
 const MIN = { abs: 5, pct: 0.03 };
 
@@ -133,8 +141,8 @@ export default async function MesSuivisPage() {
                           </div>
                         </>
                       )}
-                      <div style={{ color: "#666", fontSize: 12 }}>
-                        Créé le {new Date(r.created_at).toLocaleString()}
+                      <div style={{ color: "#666", fontSize: 12 }} suppressHydrationWarning>
+                        Créé le {fmtDateStable(r.created_at)}
                       </div>
                     </td>
                     <td style={{ padding: 10 }}>{fmtMoney(r.price_paid, r.currency_paid)}</td>
@@ -150,11 +158,11 @@ export default async function MesSuivisPage() {
                     <td style={{ padding: 10 }}>
                       {shouldAlert ? badge("ALERTE", "warn") : badge(r.last_status || "—", "muted")}
                     </td>
-                    <td style={{ padding: 10 }}>
-                      {r.last_checked_at ? new Date(r.last_checked_at).toLocaleString() : "—"}
+                    <td style={{ padding: 10 }} suppressHydrationWarning>
+                      {r.last_checked_at ? fmtDateStable(r.last_checked_at) : "—"}
                     </td>
-                    <td style={{ padding: 10 }}>
-                      {r.next_check_at ? new Date(r.next_check_at).toLocaleString() : "—"}
+                    <td style={{ padding: 10 }} suppressHydrationWarning>
+                      {r.next_check_at ? fmtDateStable(r.next_check_at) : "—"}
                     </td>
                     <td style={{ padding: 10 }}>
                        <Actions id={r.id} active={!!r.active} />
