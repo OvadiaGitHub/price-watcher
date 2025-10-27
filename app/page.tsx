@@ -9,10 +9,7 @@ const DEFAULTS = {
   hotel: { abs: 10, pct: 0.05 },  // 10€ / 5%
   flight: { abs: 20, pct: 0.04 }, // 20€ / 4%
 };
-const MIN = {
-  abs: 5,     // 5€
-  pct: 0.03,  // 3%
-};
+const MIN = { abs: 5, pct: 0.03 };
 
 export default function HomePage() {
   const [productType, setProductType] = useState<ProductType>("hotel");
@@ -46,24 +43,26 @@ export default function HomePage() {
 
   // Pré-remplissage via ?url=&checkin=&checkout=&price=&curr=&adults=&children= …
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const p = new URLSearchParams(window.location.search);
 
-    const url       = params.get("url") || "";
-    const checkin   = params.get("checkin") || "";
-    const checkout  = params.get("checkout") || "";
-    const price     = params.get("price") || params.get("price_paid") || "";
-    const curr      = (params.get("curr") || params.get("currency") || "").toUpperCase();
-    const adults    = params.get("adults") || "";
-    const children  = params.get("children") || "";
+    const url  = p.get("url") || "";
+    const cin  = p.get("checkin") || "";
+    const cout = p.get("checkout") || "";
+    const price =
+      p.get("price") || p.get("price_paid") || p.get("price_total") || "";
+    const curr =
+      (p.get("curr") || p.get("currency") || p.get("currency_code") || "")
+        .toUpperCase();
+    const adults   = p.get("adults")   || "";
+    const children = p.get("children") || "";
 
-    // si URL présente, on force le type "hotel"
     if (url) setProductType("hotel");
 
     setForm(f => ({
       ...f,
-      url,
-      checkin,
-      checkout,
+      url: url || f.url,
+      checkin: cin || f.checkin,
+      checkout: cout || f.checkout,
       price_paid: price || f.price_paid,
       currency_paid: curr || f.currency_paid,
       adults: adults || f.adults,
@@ -71,9 +70,9 @@ export default function HomePage() {
     }));
   }, []);
 
-  // si on change de type, on applique les défauts correspondants
+  // si on change de type, appliquer les défauts correspondants
   useEffect(() => {
-    setForm((f) => ({
+    setForm(f => ({
       ...f,
       threshold_abs: String(DEFAULTS[productType].abs),
       threshold_pct: String(DEFAULTS[productType].pct),
@@ -86,7 +85,7 @@ export default function HomePage() {
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type, checked } = e.target as any;
-    setForm((f) => ({ ...f, [name]: type === "checkbox" ? !!checked : value }));
+    setForm(f => ({ ...f, [name]: type === "checkbox" ? !!checked : value }));
   };
 
   function clampThresholds(body: any) {
@@ -146,9 +145,9 @@ export default function HomePage() {
 
       setMsg(`✅ Surveillance ${productType} enregistrée (id: ${json.booking?.id ?? "?"})`);
 
-      // reset utile (on garde le type, on revient aux défauts et on grise)
+      // reset (on garde le type)
       setCustomizeThresholds(false);
-      setForm((f) => ({
+      setForm(f => ({
         ...f,
         price_paid: "",
         currency_paid: "EUR",
