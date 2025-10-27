@@ -18,7 +18,7 @@ export default function HomePage() {
   const [productType, setProductType] = useState<ProductType>("hotel");
   const [customizeThresholds, setCustomizeThresholds] = useState(false);
 
-  // état du formulaire
+  // état du formulaire (contrôlé)
   const [form, setForm] = useState({
     // commun
     price_paid: "",
@@ -41,8 +41,35 @@ export default function HomePage() {
     infants: "0",
     cabin: "ECONOMY",
     bags: "0",
-    direct_only: false,
+    direct_only: false as boolean,
   });
+
+  // Pré-remplissage via ?url=&checkin=&checkout=&price=&curr=&adults=&children= …
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+
+    const url       = params.get("url") || "";
+    const checkin   = params.get("checkin") || "";
+    const checkout  = params.get("checkout") || "";
+    const price     = params.get("price") || params.get("price_paid") || "";
+    const curr      = (params.get("curr") || params.get("currency") || "").toUpperCase();
+    const adults    = params.get("adults") || "";
+    const children  = params.get("children") || "";
+
+    // si URL présente, on force le type "hotel"
+    if (url) setProductType("hotel");
+
+    setForm(f => ({
+      ...f,
+      url,
+      checkin,
+      checkout,
+      price_paid: price || f.price_paid,
+      currency_paid: curr || f.currency_paid,
+      adults: adults || f.adults,
+      children: children || f.children,
+    }));
+  }, []);
 
   // si on change de type, on applique les défauts correspondants
   useEffect(() => {
@@ -51,7 +78,6 @@ export default function HomePage() {
       threshold_abs: String(DEFAULTS[productType].abs),
       threshold_pct: String(DEFAULTS[productType].pct),
     }));
-    // si on repasse en mode défauts, on re-désactive la personnalisation
     setCustomizeThresholds(false);
   }, [productType]);
 
@@ -82,9 +108,7 @@ export default function HomePage() {
         currency_paid: form.currency_paid.toUpperCase(),
       };
 
-      // Seuils :
-      // - si l’utilisateur personnalise → on prend ses valeurs
-      // - sinon → on envoie nos défauts (non visibles mais actifs)
+      // Seuils (perso ou défauts)
       if (customizeThresholds) {
         body.threshold_abs = Number(form.threshold_abs);
         body.threshold_pct = Number(form.threshold_pct);

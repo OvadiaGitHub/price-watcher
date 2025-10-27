@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Price Watcher — Ajouter ce séjour",
+  "version": "0.1.0",
+  "description": "Ajoute la réservation en cours à Price Watcher.",
+  "permissions": ["activeTab", "scripting", "contextMenus"],
+  "host_permissions": ["*://*/*"],
+  "background": { "service_worker": "bg.js" },
+  "action": {
+    "default_title": "Ajouter à Price Watcher"
+  }
+}

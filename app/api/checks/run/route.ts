@@ -1,6 +1,8 @@
 // app/api/checks/run/route.ts
+import { buildHotelDeeplink } from "../../../../lib/deeplinks";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -73,21 +75,43 @@ export async function GET(req: Request) {
     const price_found = Math.max(1, Number(b.price_paid) - drop);
     const currency_found = (b as any).currency_paid || "EUR";
 
+    // Si c'est un hôtel (pas de champs vol), on prépare un deeplink de rebooking
+const isHotel =
+  !(b as any).origin_iata && !(b as any).destination_iata && (b as any).url;
+
+let hotelDeeplink: string | null = null;
+if (isHotel) {
+  hotelDeeplink = buildHotelDeeplink({
+    url: (b as any).url,
+    site_domain: (b as any).site_domain,
+    checkin: (b as any).checkin,
+    checkout: (b as any).checkout,
+    adults: (b as any).adults ?? 2,
+    children: (b as any).children ?? 0,
+    currency_paid: (b as any).currency_paid ?? "EUR",
+  });
+}
+
     // Écrire dans checks ET récupérer l'id du check
     const started = Date.now();
-    const { data: newCheck, error: e2 } = await supabaseAdmin
-      .from("checks")
-      .insert({
-        booking_id: (b as any).id,
-        price_found,
-        currency_found,
-        status: "ok",
-        run_ms: Date.now() - started,
-        meta: { note: id ? "manual-recheck" : "scheduler", provider: "simulation" }
-      })
-      .select("*")
-      .single();
-    if (e2) throw e2;
+const { data: newCheck, error: e2 } = await supabaseAdmin
+  .from("checks")
+  .insert({
+    booking_id: (b as any).id,
+    price_found,
+    currency_found,
+    status: "ok",
+    run_ms: Date.now() - started,
+    meta: {
+      note: id ? "manual-recheck" : "scheduler",
+      provider: isHotel ? "hotel" : "simulation",
+      ...(hotelDeeplink ? { deeplink: hotelDeeplink } : {})
+    }
+  })
+  .select("*")
+  .single();
+if (e2) throw e2;
+
 
     // Déterminer si alerte
     const deltaAbs = Number(b.price_paid) - price_found;
@@ -117,18 +141,37 @@ export async function GET(req: Request) {
   // 2) Envoi e-mail (utilitaire Resend)
   try {
     // import dynamique pour éviter de charger resend si pas nécessaire
-    const { sendPriceAlertEmail } = await import("../../../lib/mailer");
+    const { sendPriceAlertEmail } = await import("../../../../lib/mailer");
     await sendPriceAlertEmail({
       booking: b,
       price_found,
       currency_found,
       delta_abs: deltaAbs,
       delta_pct: deltaPct,
-      deeplink: (b as any).url || undefined, // hôtel: lien direct; vols: on mettra un deeplink provider plus tard
+      deeplink: (newCheck?.meta as any)?.deeplink || undefined,
     });
   } catch (e) {
     console.error("sendPriceAlertEmail error", e);
   }
+  // 3) Discord webhook (optionnel, mais super pratique en attendant l'email)
+try {
+  const hook = process.env.DISCORD_WEBHOOK_URL;
+  if (hook) {
+    const deeplink = (newCheck?.meta as any)?.deeplink || (b as any).url || "";
+    const line =
+      `🔔 Alerte Hôtel\n` +
+      `• Booking: ${(b as any).id}\n` +
+      `• Payé: ${b.price_paid} ${b.currency_paid}\n` +
+      `• Trouvé: ${price_found} ${currency_found}\n` +
+      `• Gain: ~${Math.round(deltaAbs)}€${deltaPct != null ? ` (~${Math.round(deltaPct*100)}%)` : ""}\n` +
+      (deeplink ? `• Rebook: ${deeplink}` : "");
+    const { sendDiscordAlert } = await import("../../../../lib/webhooks");
+    await sendDiscordAlert(hook, line);
+  }
+} catch (e) {
+  console.error("discord webhook error", e);
+}
+
 }
 
 
